@@ -47,20 +47,42 @@ with st.sidebar:
     st.divider()
 
     st.subheader("🔧 Advanced")
-    header_row_idx = st.number_input(
-        "Header Row Index (0-based)",
-        min_value=0,
-        value=9,
-        help="Change this if your file has more/less top rows.",
+
+    # File Layout Selection
+    layout_mode = st.radio(
+        "รูปแบบไฟล์ (File Layout)",
+        ["Detailed Breakdown (แยกประเภทของ)", "Simple List (รวมจำนวนมาแล้ว)"],
+        index=1,
     )
 
-    # New: Destination Column Selector
-    dest_col_idx = st.number_input(
-        "Destination Column Index (0-based)",
-        min_value=0,
-        value=16,
-        help="Index of the column containing Hotel/Destination info.",
-    )
+    st.divider()
+
+    if layout_mode == "Detailed Breakdown (แยกประเภทของ)":
+        st.caption("สำหรับไฟล์ที่มีแยก Luggage, Wheelchair, Sport Eq.")
+        header_row_idx = st.number_input(
+            "Header Row Index (0-based)", min_value=0, value=9
+        )
+        dest_col_idx = st.number_input(
+            "Destination Column Index (0-based)", min_value=0, value=16
+        )
+
+    else:
+        st.caption("สำหรับไฟล์ที่มีคอลัมน์ 'จำนวนรวม' มาให้เลย (เช่น แผนงาน.xlsx)")
+        header_row_idx = st.number_input(
+            "Header Row Index (0-based)",
+            min_value=0,
+            value=0,
+            help="บรรทัดแรกของหัวตาราง (เริ่มนับที่ 0)",
+        )
+
+        # Default indices based on 'แผนงาน.xlsx' inspection
+        # 0: Country, 1: Date, 2: Flight, 3: Time, 4: Hotel, 5: Qty
+        c_date = st.number_input("Col: Date (Index)", value=1)
+        c_flight = st.number_input("Col: Flight (Index)", value=2)
+        c_time = st.number_input("Col: Time (Index)", value=3)
+        c_hotel = st.number_input("Col: Hotel/Dest (Index)", value=4)
+        c_qty = st.number_input("Col: Total Qty (Index)", value=5)
+
     show_raw = st.checkbox("Show Raw Data for Debugging")
 
 
@@ -82,9 +104,14 @@ def optimize_transport(flight_data, max_cap):
     dest_groups = []
     for _, row in flight_data.iterrows():
         d = str(row["Destination"]).strip()
+
+        # Handle Empty/Nan Destination -> "Unknown"
+        if d.lower() in ["nan", "", "none", "nat"]:
+            d = "Unassigned Hotel"
+
         qty = row["Total_Items"]
         if qty > 0:
-            dest_groups.append({"dest": d, "qty": qty, "group": row["Group"]})
+            dest_groups.append({"dest": d, "qty": qty, "group": row.get("Group", "-")})
 
     # Sort by quantity descending (Greedy approach)
     dest_groups.sort(key=lambda x: x["qty"], reverse=True)
@@ -167,56 +194,81 @@ if uploaded_file:
             st.warning("🔧 Debug Mode: Showing first 20 rows of raw data")
             st.dataframe(df.head(20))
             st.write("Columns found:", df.columns.tolist())
-            st.write(f"Trying to read Destination from Column Index: {dest_col_idx}")
+            if layout_mode == "Detailed Breakdown (แยกประเภทของ)":
+                st.write(
+                    f"Trying to read Destination from Column Index: {dest_col_idx}"
+                )
 
-        # Column Indices Mapping
-        # [1, 2, 3, 4, 9, 11, 12, 13, 14] + Destination
-        # Using iloc is risky if columns shift.
-        # But sticking to user logic for now.
+        # --- DATA EXTRACTION ---
+        if layout_mode == "Detailed Breakdown (แยกประเภทของ)":
+            # Column Indices Mapping
+            # [1, 2, 3, 4, 9, 11, 12, 13, 14] + Destination
+            # Using iloc is risky if columns shift.
+            # But sticking to user logic for now.
 
-        req_indices = [1, 2, 3, 4, 9, 11, 12, 13, 14, dest_col_idx]
+            req_indices = [1, 2, 3, 4, 9, 11, 12, 13, 14, dest_col_idx]
 
-        # Validate bounds
-        if max(req_indices) >= len(df.columns):
-            st.error(
-                f"❌ Column Index {max(req_indices)} out of bounds. File has {len(df.columns)} columns."
-            )
-            st.stop()
+            # Validate bounds
+            if max(req_indices) >= len(df.columns):
+                st.error(
+                    f"❌ Column Index {max(req_indices)} out of bounds. File has {len(df.columns)} columns."
+                )
+                st.stop()
 
-        # Extract
-        data = df.iloc[1:, req_indices].copy()
-        data.columns = [
-            "No",
-            "Date",
-            "Flight",
-            "Time",
-            "Group",
-            "WC_Man",
-            "WC_Elec",
-            "Luggage",
-            "Sport_Eq",
-            "Destination",
-        ]
+            # Extract
+            data = df.iloc[1:, req_indices].copy()
+            data.columns = [
+                "No",
+                "Date",
+                "Flight",
+                "Time",
+                "Group",
+                "WC_Man",
+                "WC_Elec",
+                "Luggage",
+                "Sport_Eq",
+                "Destination",
+            ]
 
-        # Filter NA
-        data = data.dropna(subset=["Flight", "Time"])
+            # Filter NA
+            data = data.dropna(subset=["Flight", "Time"])
 
-        # Clean Numerics
-        def clean_num(x):
-            try:
-                if pd.isna(x) or str(x).strip() in ["-", "", "nan"]:
+            # Clean Numerics
+            def clean_num(x):
+                try:
+                    if pd.isna(x) or str(x).strip() in ["-", "", "nan"]:
+                        return 0
+                    return float(x)
+                except:
                     return 0
-                return float(x)
-            except:
-                return 0
 
-        for c in ["WC_Man", "WC_Elec", "Luggage", "Sport_Eq"]:
-            data[c] = data[c].apply(clean_num)
+            for c in ["WC_Man", "WC_Elec", "Luggage", "Sport_Eq"]:
+                data[c] = data[c].apply(clean_num)
 
-        # Calc Total
-        data["Total_Items"] = (
-            data["Luggage"] + data["Sport_Eq"] + data["WC_Man"] + data["WC_Elec"]
-        )
+            # Calc Total
+            data["Total_Items"] = (
+                data["Luggage"] + data["Sport_Eq"] + data["WC_Man"] + data["WC_Elec"]
+            )
+
+        else:
+            # --- SIMPLE LIST MODE ---
+            # Select columns by user index (Date, Flight, Time, Hotel, Qty)
+            target_cols = [c_date, c_flight, c_time, c_hotel, c_qty]
+            if max(target_cols) >= len(df.columns):
+                st.error(
+                    f"❌ Column Index exceeds file width ({len(df.columns)} cols). Check settings."
+                )
+                st.stop()
+
+            data = df.iloc[:, target_cols].copy()
+            data.columns = ["Date", "Flight", "Time", "Destination", "Total_Items"]
+
+            # Cleaning
+            data = data.dropna(subset=["Flight", "Total_Items"])
+            data["Total_Items"] = pd.to_numeric(
+                data["Total_Items"], errors="coerce"
+            ).fillna(0)
+            data["Group"] = "-"  # Optional placeholder
 
         # --- Algorithm Calculation ---
 
