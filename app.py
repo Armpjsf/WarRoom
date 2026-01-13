@@ -70,8 +70,11 @@ def load_data_and_colors():
 
         SHEET_URL = "https://docs.google.com/spreadsheets/d/1TCXZeJexCI4VZ05LTUxildTPxXpvjiKZAnnFEx2NdvQ/edit?gid"
 
-        workbook = client.open_by_url(SHEET_URL)  # โหลดข้อมูล Manifest
-        # โหลดข้อมูล Manifest
+        workbook = client.open_by_url(SHEET_URL)
+
+        # ---------------------------------------------------------
+        # 1. โหลดข้อมูล Manifest (งานหลัก)
+        # ---------------------------------------------------------
         sheet_manifest = workbook.worksheet("Manifest")
         data_manifest = sheet_manifest.get_all_records()
 
@@ -82,14 +85,53 @@ def load_data_and_colors():
         else:
             df = pd.DataFrame(data_manifest)
 
-        # โหลดข้อมูล Master_Hotels (Color Map)
+        # ---------------------------------------------------------
+        # 2. คำนวณยอดกระเป๋า (Total_Bags) จาก Seals & Bags
+        # ---------------------------------------------------------
+        try:
+            # ถ้า DataFrame หลักไม่ว่าง ให้ลองไปดึงข้อมูลถุงมานับ
+            if not df.empty:
+                sheet_seals = workbook.worksheet("Seals")
+                data_seals = sheet_seals.get_all_records()
+                df_seals = pd.DataFrame(data_seals)
+
+                sheet_bags = workbook.worksheet("Bags")
+                data_bags = sheet_bags.get_all_records()
+                df_bags = pd.DataFrame(data_bags)
+
+                if not df_seals.empty and not df_bags.empty:
+                    # เชื่อม Bags -> Seals (ผ่าน Seal_ID)
+                    merged_bags = df_bags.merge(df_seals, on="Seal_ID", how="left")
+
+                    # นับจำนวนกระเป๋าต่อ Job (Group by Job_ID)
+                    job_counts = (
+                        merged_bags.groupby("Job_ID")["Bag_ID"].count().reset_index()
+                    )
+                    job_counts.columns = ["Job_ID", "Total_Bags"]
+
+                    # เอาไปแปะรวมกับ df หลัก
+                    df = df.merge(job_counts, on="Job_ID", how="left")
+                    df["Total_Bags"] = df["Total_Bags"].fillna(0).astype(int)
+                else:
+                    df["Total_Bags"] = 0
+            else:
+                # ถ้า df หลักว่าง ก็สร้างคอลัมน์เปล่าๆ ไว้กัน Error
+                df["Total_Bags"] = 0
+
+        except Exception as e:
+            # ถ้ามีปัญหาตอนดึงถุง (เช่น ยังไม่สร้าง Sheet) ให้ใส่ 0 ไปก่อน อย่าให้โปรแกรมพัง
+            if not df.empty:
+                df["Total_Bags"] = 0
+
+        # ---------------------------------------------------------
+        # 3. โหลดข้อมูล Master_Hotels (Color Map)
+        # ---------------------------------------------------------
         try:
             sheet_hotels = workbook.worksheet("Master_Hotels")
             data_hotels = sheet_hotels.get_all_records()
             df_hotels = pd.DataFrame(data_hotels)
 
             # Create Color Map dictionary: { 'Hotel_Name': 'Hex_Code' }
-            # Fallback to defaults if empty
             if (
                 not df_hotels.empty
                 and "Hotel_Name" in df_hotels.columns
@@ -110,10 +152,11 @@ def load_data_and_colors():
                 }
                 color_map.update(status_colors)
             else:
+                # กรณี Master_Hotels มีปัญหา ให้ใช้ค่า Default
                 raise ValueError("Master_Hotels empty or missing columns")
 
         except Exception as color_error:
-            # Fallback if Master_Hotels fails
+            # Fallback colors
             color_map = {
                 "หอพัก ม.สุรนารี (SUT)": "#F1C40F",
                 "Kantary Hotel": "#E74C3C",
@@ -134,7 +177,7 @@ def load_data_and_colors():
         return df, color_map, None
 
     except Exception as e:
-        return None, e
+        return None, None, e
 
 
 # --- 5. MAIN APP ---
@@ -283,6 +326,7 @@ display_cols = [
     "Time_Depart",
     "Car_License",
     "Destination",
+    "Total_Bags",
     "Status",
     "Seal_Number",
 ]
