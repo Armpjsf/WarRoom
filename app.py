@@ -51,7 +51,7 @@ st.markdown(
 
 
 # --- 4. CONNECT GOOGLE SHEETS ---
-@st.cache_data(ttl=60) # เพิ่ม cache time เป็น 60 วิ เพื่อลด load
+@st.cache_data(ttl=60)  # เพิ่ม cache time เป็น 60 วิ เพื่อลด load
 def load_data_and_colors():
     try:
         scope = [
@@ -88,15 +88,20 @@ def load_data_and_colors():
         rename_map = {
             "Origin": "Airport",
             "Date": "Time_Depart",
-            "Total_Items": "Total_Bags"
+            "Total_Items": "Total_Bags",
         }
         df = df.rename(columns=rename_map)
 
-        if "Airport" not in df.columns: df["Airport"] = "Unknown"
-        if "Total_Bags" not in df.columns: df["Total_Bags"] = 0
-        if "Time_Depart" not in df.columns: df["Time_Depart"] = None
-        
-        df["Total_Bags"] = pd.to_numeric(df["Total_Bags"], errors='coerce').fillna(0).astype(int)
+        if "Airport" not in df.columns:
+            df["Airport"] = "Unknown"
+        if "Total_Bags" not in df.columns:
+            df["Total_Bags"] = 0
+        if "Time_Depart" not in df.columns:
+            df["Time_Depart"] = None
+
+        df["Total_Bags"] = (
+            pd.to_numeric(df["Total_Bags"], errors="coerce").fillna(0).astype(int)
+        )
 
         # ---------------------------------------------------------
         # 2. โหลดข้อมูล Master_Hotels
@@ -106,10 +111,22 @@ def load_data_and_colors():
             data_hotels = sheet_hotels.get_all_records()
             df_hotels = pd.DataFrame(data_hotels)
 
-            if not df_hotels.empty and "Hotel_Name" in df_hotels.columns and "Hex_Code" in df_hotels.columns:
+            if (
+                not df_hotels.empty
+                and "Hotel_Name" in df_hotels.columns
+                and "Hex_Code" in df_hotels.columns
+            ):
                 color_map = pd.Series(
                     df_hotels.Hex_Code.values, index=df_hotels.Hotel_Name
                 ).to_dict()
+
+                # --- SANITIZE COLOR MAP ---
+                # Remove invalid hex codes (NaN, empty, non-string, etc.)
+                color_map = {
+                    k: v
+                    for k, v in color_map.items()
+                    if isinstance(v, str) and v.strip().startswith("#")
+                }
 
                 status_colors = {
                     "Loading": "#F39C12",
@@ -133,7 +150,7 @@ def load_data_and_colors():
                 "Issue": "#C0392B",
                 "BKK": "#6C5CE7",
                 "DMK": "#00B894",
-                "Other": "#95A5A6"
+                "Other": "#95A5A6",
             }
 
         return df, color_map, None
@@ -155,10 +172,12 @@ if df.empty:
 # --- 6. SIDEBAR FILTER ---
 with st.sidebar:
     st.title("🔍 ตัวกรอง (Filter)")
-    
-    airport_options = ["All"] + sorted([x for x in df["Airport"].unique() if str(x).strip() != ""])
+
+    airport_options = ["All"] + sorted(
+        [x for x in df["Airport"].unique() if str(x).strip() != ""]
+    )
     selected_airport = st.selectbox("เลือกสนามบินต้นทาง:", airport_options)
-    
+
     st.markdown("---")
     st.caption(f"Last Auto-Update: {datetime.now().strftime('%H:%M:%S')}")
 
@@ -173,13 +192,16 @@ st.title("🚛 APG 2026: Logistics Command Center")
 
 # คำนวณระยะเวลา (Duration)
 try:
-    filtered_df["Time_Depart"] = pd.to_datetime(filtered_df["Time_Depart"], errors="coerce")
+    filtered_df["Time_Depart"] = pd.to_datetime(
+        filtered_df["Time_Depart"], errors="coerce"
+    )
     now = datetime.now()
-    
+
     filtered_df["Duration_Hours"] = filtered_df.apply(
         lambda row: (
             (now - row["Time_Depart"]).total_seconds() / 3600
-            if pd.notnull(row["Time_Depart"]) and row["Status"] in ["In-Transit", "Loaded"]
+            if pd.notnull(row["Time_Depart"])
+            and row["Status"] in ["In-Transit", "Loaded"]
             else 0
         ),
         axis=1,
@@ -221,9 +243,7 @@ if issues > 0 or not long_running.empty:
         if not long_running.empty:
             st.warning(f"🟡 รถวิ่งนานเกิน 4 ชม. : {len(long_running)} คัน")
             st.dataframe(
-                long_running[
-                    ["Car_License", "Destination", "Duration_Hours"]
-                ],
+                long_running[["Car_License", "Destination", "Duration_Hours"]],
                 use_container_width=True,
             )
 
@@ -234,22 +254,28 @@ with c1:
     st.subheader(f"📍 ปริมาณงานแยกตามปลายทาง ({selected_airport})")
     if not filtered_df.empty:
         df_chart = filtered_df.copy()
-        
+
         # 1. แปลงเป็น String และแยกด้วยจุลภาค
-        df_chart["Destination_Split"] = df_chart["Destination"].astype(str).str.split(",")
-        
+        df_chart["Destination_Split"] = (
+            df_chart["Destination"].astype(str).str.split(",")
+        )
+
         # 2. Explode แยกบรรทัด
         df_exploded = df_chart.explode("Destination_Split")
-        
+
         # 3. ตัดช่องว่างหัวท้าย
         df_exploded["Destination_Split"] = df_exploded["Destination_Split"].str.strip()
-        
+
         # 4. *** แก้ไขจุดสำคัญ: กรองเอาเฉพาะที่มีตัวหนังสือ (ไม่เอาค่าว่าง) ***
         df_exploded = df_exploded[df_exploded["Destination_Split"] != ""]
         df_exploded = df_exploded[df_exploded["Destination_Split"].str.len() > 0]
 
         if not df_exploded.empty:
-            load_counts = df_exploded.groupby("Destination_Split").size().reset_index(name="Count")
+            load_counts = (
+                df_exploded.groupby("Destination_Split")
+                .size()
+                .reset_index(name="Count")
+            )
 
             fig_bar = px.bar(
                 load_counts,
@@ -259,7 +285,9 @@ with c1:
                 color_discrete_map=color_map,
                 text_auto=True,
             )
-            fig_bar.update_layout(xaxis_title="Destination", yaxis_title="Number of Drops")
+            fig_bar.update_layout(
+                xaxis_title="Destination", yaxis_title="Number of Drops"
+            )
             st.plotly_chart(fig_bar, use_container_width=True)
         else:
             st.info("No destination data to display.")
