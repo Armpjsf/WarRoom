@@ -274,25 +274,29 @@ with c2:
         )
         st.plotly_chart(fig_pie, use_container_width=True)
 
+# ... (ส่วนอื่นเหมือนเดิม)
+
 # --- 10. REAL-TIME TABLE ---
 st.subheader("📝 บันทึกการเดินรถ (Real-time Log)")
 
-# เลือกคอลัมน์ที่จะโชว์ (ตัด Job_ID ออก, เพิ่ม Total_Bags)
+# เลือกเฉพาะคอลัมน์ที่มนุษย์ควรอ่าน (ตัด Color และ Type ทิ้ง)
 display_cols = [
-    "Time_Depart",
-    "Airport",
+    "Date",          # หรือ Time_Depart
+    "Origin",        # หรือ Airport
     "Car_License",
+    "Driver",        # เพิ่มคนขับเข้ามา
     "Destination",
-    "Total_Bags",  # อันนี้คือ Total_Items จาก Sheet
+    "Total_Items",   # หรือ Total_Bags
     "Status",
     "Seal_Number",
 ]
 
-# กรองเอาเฉพาะคอลัมน์ที่มีอยู่จริง เพื่อป้องกัน Error
+# กรองเอาเฉพาะคอลัมน์ที่มีอยู่จริงใน Excel ป้องกัน Error
 safe_cols = [c for c in display_cols if c in filtered_df.columns]
 
 st.dataframe(
-    filtered_df.sort_values(by="Time_Depart", ascending=False)[safe_cols],
+    filtered_df.sort_values(by="Date", ascending=False)[safe_cols],
     use_container_width=True,
     height=400,
+    hide_index=True, # ซ่อนเลขบรรทัด 0,1,2 กวนตา
 )
