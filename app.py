@@ -14,8 +14,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 5 นาที = 300 วินาที = 300000 มิลลิวินาที
-count = st_autorefresh(interval=300000, limit=None, key="warroom_refresh")
+# --- 2. AUTO REFRESH (ปรับเป็น 3 นาที ตามที่ขอ) ---
+# 3 นาที = 180,000 milliseconds
+count = st_autorefresh(interval=180000, limit=None, key="warroom_refresh")
 
 # --- 3. CSS STYLING ---
 st.markdown(
@@ -50,7 +51,7 @@ st.markdown(
 
 
 # --- 4. CONNECT GOOGLE SHEETS ---
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=60) # เพิ่ม cache time เป็น 60 วิ เพื่อลด load
 def load_data_and_colors():
     try:
         scope = [
@@ -67,7 +68,7 @@ def load_data_and_colors():
             )
 
         client = gspread.authorize(creds)
-        # *** ตรวจสอบ Link Google Sheet ให้ถูกต้อง ***
+        # *** Link Google Sheet ***
         SHEET_URL = "https://docs.google.com/spreadsheets/d/1TCXZeJexCI4VZ05LTUxildTPxXpvjiKZAnnFEx2NdvQ/edit?gid"
         workbook = client.open_by_url(SHEET_URL)
 
@@ -84,7 +85,6 @@ def load_data_and_colors():
             df = pd.DataFrame(data_manifest)
 
         # --- DATA CLEANING & MAPPING ---
-        # เปลี่ยนชื่อคอลัมน์จาก Google Sheet ให้เป็นชื่อที่โค้ดใช้
         rename_map = {
             "Origin": "Airport",
             "Date": "Time_Depart",
@@ -92,12 +92,10 @@ def load_data_and_colors():
         }
         df = df.rename(columns=rename_map)
 
-        # สร้างคอลัมน์กัน Error ถ้าไม่มี
         if "Airport" not in df.columns: df["Airport"] = "Unknown"
         if "Total_Bags" not in df.columns: df["Total_Bags"] = 0
         if "Time_Depart" not in df.columns: df["Time_Depart"] = None
         
-        # แปลงตัวเลข
         df["Total_Bags"] = pd.to_numeric(df["Total_Bags"], errors='coerce').fillna(0).astype(int)
 
         # ---------------------------------------------------------
@@ -188,7 +186,6 @@ try:
     )
 except Exception as e:
     filtered_df["Duration_Hours"] = 0
-    # st.warning(f"Time calculation error: {e}") # Debug only
 
 # --- 8. DASHBOARD UI ---
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -230,29 +227,42 @@ if issues > 0 or not long_running.empty:
                 use_container_width=True,
             )
 
-# --- 9. SMART CHARTS ---
+# --- 9. SMART CHARTS (แก้ไข Error ค่าว่างแล้ว) ---
 c1, c2 = st.columns([2, 1])
 
 with c1:
     st.subheader(f"📍 ปริมาณงานแยกตามปลายทาง ({selected_airport})")
     if not filtered_df.empty:
         df_chart = filtered_df.copy()
+        
+        # 1. แปลงเป็น String และแยกด้วยจุลภาค
         df_chart["Destination_Split"] = df_chart["Destination"].astype(str).str.split(",")
+        
+        # 2. Explode แยกบรรทัด
         df_exploded = df_chart.explode("Destination_Split")
+        
+        # 3. ตัดช่องว่างหัวท้าย
         df_exploded["Destination_Split"] = df_exploded["Destination_Split"].str.strip()
+        
+        # 4. *** แก้ไขจุดสำคัญ: กรองเอาเฉพาะที่มีตัวหนังสือ (ไม่เอาค่าว่าง) ***
+        df_exploded = df_exploded[df_exploded["Destination_Split"] != ""]
+        df_exploded = df_exploded[df_exploded["Destination_Split"].str.len() > 0]
 
-        load_counts = df_exploded.groupby("Destination_Split").size().reset_index(name="Count")
+        if not df_exploded.empty:
+            load_counts = df_exploded.groupby("Destination_Split").size().reset_index(name="Count")
 
-        fig_bar = px.bar(
-            load_counts,
-            x="Destination_Split",
-            y="Count",
-            color="Destination_Split",
-            color_discrete_map=color_map,
-            text_auto=True,
-        )
-        fig_bar.update_layout(xaxis_title="Destination", yaxis_title="Number of Drops")
-        st.plotly_chart(fig_bar, use_container_width=True)
+            fig_bar = px.bar(
+                load_counts,
+                x="Destination_Split",
+                y="Count",
+                color="Destination_Split",
+                color_discrete_map=color_map,
+                text_auto=True,
+            )
+            fig_bar.update_layout(xaxis_title="Destination", yaxis_title="Number of Drops")
+            st.plotly_chart(fig_bar, use_container_width=True)
+        else:
+            st.info("No destination data to display.")
 
 with c2:
     st.subheader("⏳ สถานะงาน")
