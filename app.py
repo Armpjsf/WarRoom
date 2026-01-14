@@ -67,11 +67,12 @@ def load_data_and_colors():
             )
 
         client = gspread.authorize(creds)
+        # *** ตรวจสอบ Link Google Sheet ให้ถูกต้อง ***
         SHEET_URL = "https://docs.google.com/spreadsheets/d/1TCXZeJexCI4VZ05LTUxildTPxXpvjiKZAnnFEx2NdvQ/edit?gid"
         workbook = client.open_by_url(SHEET_URL)
 
         # ---------------------------------------------------------
-        # 1. โหลดข้อมูล Manifest (โครงสร้างใหม่)
+        # 1. โหลดข้อมูล Manifest
         # ---------------------------------------------------------
         sheet_manifest = workbook.worksheet("Manifest")
         data_manifest = sheet_manifest.get_all_records()
@@ -83,25 +84,24 @@ def load_data_and_colors():
             df = pd.DataFrame(data_manifest)
 
         # --- DATA CLEANING & MAPPING ---
-        # ปรับชื่อคอลัมน์ให้ตรงกับที่ Code ใช้งาน (Mapping)
-        # Sheet Header -> Code Variable
+        # เปลี่ยนชื่อคอลัมน์จาก Google Sheet ให้เป็นชื่อที่โค้ดใช้
         rename_map = {
-            "Origin": "Airport",          # ถ้าใน Sheet ชื่อ Origin (Airport) ให้แก้ตรงนี้ให้ตรง
+            "Origin": "Airport",
             "Date": "Time_Depart",
             "Total_Items": "Total_Bags"
         }
         df = df.rename(columns=rename_map)
 
-        # ถ้าชื่อคอลัมน์ใน Sheet ไม่ตรงเป๊ะๆ ให้สร้าง Dummy ขึ้นมากัน Error
+        # สร้างคอลัมน์กัน Error ถ้าไม่มี
         if "Airport" not in df.columns: df["Airport"] = "Unknown"
         if "Total_Bags" not in df.columns: df["Total_Bags"] = 0
+        if "Time_Depart" not in df.columns: df["Time_Depart"] = None
         
-        # แปลงตัวเลขจำนวนถุง
+        # แปลงตัวเลข
         df["Total_Bags"] = pd.to_numeric(df["Total_Bags"], errors='coerce').fillna(0).astype(int)
 
-
         # ---------------------------------------------------------
-        # 2. โหลดข้อมูล Master_Hotels (Color Map)
+        # 2. โหลดข้อมูล Master_Hotels
         # ---------------------------------------------------------
         try:
             sheet_hotels = workbook.worksheet("Master_Hotels")
@@ -113,22 +113,20 @@ def load_data_and_colors():
                     df_hotels.Hex_Code.values, index=df_hotels.Hotel_Name
                 ).to_dict()
 
-                # เพิ่มสี Status และ Airport
                 status_colors = {
-                    "Loading": "#F39C12",   # ส้ม
-                    "Loaded": "#F39C12",    # ส้ม (เพิ่ม Loaded เข้ามา)
-                    "In-Transit": "#2980B9",# น้ำเงิน
-                    "Completed": "#27AE60", # เขียว
-                    "Issue": "#C0392B",     # แดง
-                    "BKK": "#6C5CE7",       # ม่วง
-                    "DMK": "#00B894",       # เขียวมิ้นท์
+                    "Loading": "#F39C12",
+                    "Loaded": "#F39C12",
+                    "In-Transit": "#2980B9",
+                    "Completed": "#27AE60",
+                    "Issue": "#C0392B",
+                    "BKK": "#6C5CE7",
+                    "DMK": "#00B894",
                 }
                 color_map.update(status_colors)
             else:
                 raise ValueError("Colors missing")
 
         except Exception:
-            # Fallback Colors (ถ้าโหลดไม่ได้ ใช้สีสำรอง)
             color_map = {
                 "Loading": "#F39C12",
                 "Loaded": "#F39C12",
@@ -160,7 +158,6 @@ if df.empty:
 with st.sidebar:
     st.title("🔍 ตัวกรอง (Filter)")
     
-    # กรองเฉพาะ Airport ที่มีข้อมูลจริง
     airport_options = ["All"] + sorted([x for x in df["Airport"].unique() if str(x).strip() != ""])
     selected_airport = st.selectbox("เลือกสนามบินต้นทาง:", airport_options)
     
@@ -181,7 +178,6 @@ try:
     filtered_df["Time_Depart"] = pd.to_datetime(filtered_df["Time_Depart"], errors="coerce")
     now = datetime.now()
     
-    # คำนวณเฉพาะรถที่ออกไปแล้ว (Loaded / In-Transit)
     filtered_df["Duration_Hours"] = filtered_df.apply(
         lambda row: (
             (now - row["Time_Depart"]).total_seconds() / 3600
@@ -190,13 +186,13 @@ try:
         ),
         axis=1,
     )
-except:
+except Exception as e:
     filtered_df["Duration_Hours"] = 0
+    # st.warning(f"Time calculation error: {e}") # Debug only
 
 # --- 8. DASHBOARD UI ---
 col1, col2, col3, col4, col5 = st.columns(5)
 total_jobs = len(filtered_df)
-# นับรวม Loading และ Loaded เป็นสถานะ Active เหมือนกัน
 loading = len(filtered_df[filtered_df["Status"].isin(["Loading", "Loaded"])])
 in_transit = len(filtered_df[filtered_df["Status"] == "In-Transit"])
 completed = len(filtered_df[filtered_df["Status"] == "Completed"])
@@ -241,12 +237,10 @@ with c1:
     st.subheader(f"📍 ปริมาณงานแยกตามปลายทาง ({selected_airport})")
     if not filtered_df.empty:
         df_chart = filtered_df.copy()
-        # แยก Destination ด้วยจุลภาค (เผื่อมีหลายที่)
         df_chart["Destination_Split"] = df_chart["Destination"].astype(str).str.split(",")
         df_exploded = df_chart.explode("Destination_Split")
         df_exploded["Destination_Split"] = df_exploded["Destination_Split"].str.strip()
 
-        # นับจำนวน
         load_counts = df_exploded.groupby("Destination_Split").size().reset_index(name="Count")
 
         fig_bar = px.bar(
@@ -274,30 +268,28 @@ with c2:
         )
         st.plotly_chart(fig_pie, use_container_width=True)
 
-# ... (ส่วนอื่นเหมือนเดิม)
-
 # --- 10. REAL-TIME TABLE ---
 st.subheader("📝 บันทึกการเดินรถ (Real-time Log)")
 
-# เลือกคอลัมน์ที่จะโชว์ (ต้องใช้ชื่อที่เป็นภาษา Python ในระบบ ไม่ใช่ชื่อหัวตาราง Excel)
 display_cols = [
-    "Time_Depart",   # แก้จาก Date
-    "Airport",       # แก้จาก Origin
+    "Time_Depart",
+    "Airport",
     "Car_License",
     "Driver",
     "Destination",
-    "Total_Bags",    # แก้จาก Total_Items
+    "Total_Bags",
     "Status",
     "Seal_Number",
 ]
 
-# กรองเอาเฉพาะคอลัมน์ที่มีอยู่จริง เพื่อป้องกัน Error
 safe_cols = [c for c in display_cols if c in filtered_df.columns]
 
-# เรียงลำดับตาม Time_Depart (ล่าสุดขึ้นก่อน)
-st.dataframe(
-    filtered_df.sort_values(by="Time_Depart", ascending=False)[safe_cols],
-    use_container_width=True,
-    height=400,
-    hide_index=True,
-)
+if not filtered_df.empty:
+    st.dataframe(
+        filtered_df.sort_values(by="Time_Depart", ascending=False)[safe_cols],
+        use_container_width=True,
+        height=400,
+        hide_index=True,
+    )
+else:
+    st.write("No data available.")
