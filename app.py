@@ -14,8 +14,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- 2. AUTO REFRESH (ทุก 30 วินาที) ---
-count = st_autorefresh(interval=30000, limit=None, key="warroom_refresh")
+# 5 นาที = 300 วินาที = 300000 มิลลิวินาที
+count = st_autorefresh(interval=300000, limit=None, key="warroom_refresh")
 
 # --- 3. CSS STYLING ---
 st.markdown(
