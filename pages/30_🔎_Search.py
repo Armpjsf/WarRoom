@@ -218,11 +218,27 @@ if not results.empty and not df_bags.empty and not df_seals.empty:
             # If user added Hotel/Country cols, get_all_records() reads them.
             # Let's check for 'Hotel' vs 'Hotel_Name' (from Seal)
 
+            # Coalesce Hotel (Robust Logic)
+            # Identify Seal-derived vs Bag-derived columns
+            seal_hotel_source = pd.Series(
+                [None] * len(export_df), index=export_df.index
+            )
+            if "Hotel_Name" in export_df.columns:
+                seal_hotel_source = seal_hotel_source.fillna(export_df["Hotel_Name"])
+            if "Hotel_y" in export_df.columns:
+                seal_hotel_source = seal_hotel_source.fillna(export_df["Hotel_y"])
+
+            bag_hotel_source = pd.Series([None] * len(export_df), index=export_df.index)
+            if "Hotel_x" in export_df.columns:
+                bag_hotel_source = bag_hotel_source.fillna(export_df["Hotel_x"])
             if "Hotel" in export_df.columns:
-                # If Bag has 'Hotel' col
-                export_df["Hotel_Name"] = export_df["Hotel"].fillna(
-                    export_df["Hotel_Name"]
-                )
+                # If "Hotel" exists, it likely comes from Bag (if Seal was Hotel_Name)
+                # or Seal (if Bag had no Hotel).
+                # Given user added "Hotel" to Bags, this is likely Bag data.
+                bag_hotel_source = bag_hotel_source.fillna(export_df["Hotel"])
+
+            # Merge: Bag > Seal
+            export_df["Hotel_Name"] = bag_hotel_source.fillna(seal_hotel_source)
 
             # Clean up empty strings to dash
             export_df["Country"] = export_df["Country"].replace(["", "nan", None], "-")
