@@ -105,7 +105,7 @@ st.title("🔎 ค้นหาและตรวจสอบ (Search & Audit)")
 
 if st.button("🔄 Refresh Data"):
     load_all_data.clear()
-    st.experimental_rerun()
+    st.rerun()
 
 df_manifest, df_bags, df_seals = load_all_data()
 
