@@ -160,6 +160,9 @@ if not results.empty and not df_bags.empty and not df_seals.empty:
             df_bags["Seal_ID"].astype(str).isin(relevant_seals)
         ].copy()
 
+        # Enforce String Type for consistent merging/mapping
+        export_bags["Seal_ID"] = export_bags["Seal_ID"].astype(str).str.strip()
+
         if not df_seals.empty:
             df_seals["Seal_ID"] = df_seals["Seal_ID"].astype(str)
 
