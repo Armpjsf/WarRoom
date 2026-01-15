@@ -199,6 +199,37 @@ if not results.empty and not df_bags.empty and not df_seals.empty:
             if "Country" not in export_df.columns:
                 export_df["Country"] = "-"
 
+            # [NEW] Traceability Logic: Prioritize Bag-Level Data
+            # If Bags sheet has Hotel/Country (from new station logic), usage them.
+            # Merge might result in Country_x (Bag), Country_y (Seal).
+
+            # Coalesce Country
+            if "Country_x" in export_df.columns and "Country_y" in export_df.columns:
+                export_df["Country"] = export_df["Country_x"].fillna(
+                    export_df["Country_y"]
+                )
+            elif "Country_x" in export_df.columns:
+                export_df["Country"] = export_df["Country_x"]
+            # If only Country (from Seal) exists, it stays as "Country"
+
+            # Coalesce Hotel
+            # Check for potential Bag-level Hotel column (might be named 'Hotel' or similar)
+            # Standard Bags sheet usually: Bag_ID, Seal_ID.
+            # If user added Hotel/Country cols, get_all_records() reads them.
+            # Let's check for 'Hotel' vs 'Hotel_Name' (from Seal)
+
+            if "Hotel" in export_df.columns:
+                # If Bag has 'Hotel' col
+                export_df["Hotel_Name"] = export_df["Hotel"].fillna(
+                    export_df["Hotel_Name"]
+                )
+
+            # Clean up empty strings to dash
+            export_df["Country"] = export_df["Country"].replace(["", "nan", None], "-")
+            export_df["Hotel_Name"] = export_df["Hotel_Name"].replace(
+                ["", "nan", None], "-"
+            )
+
             # Select Reordered Columns for Clean Export
             cols_order = [
                 "Bag_ID",
@@ -218,7 +249,7 @@ if not results.empty and not df_bags.empty and not df_seals.empty:
 
             st.download_button(
                 "📄 Download Detailed Report (.csv)",
-                export_df[final_cols].to_csv(index=False).encode("utf-8"),
+                export_df[final_cols].to_csv(index=False).encode("utf-8-sig"),
                 "report.csv",
                 "text/csv",
             )
